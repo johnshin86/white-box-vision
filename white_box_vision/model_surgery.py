@@ -4,10 +4,10 @@ import timm
 from timm.models.vision_transformer import Block 
 
 # pretrained models will be from timm, 
-# since afaik, it's the most popular ViT library. 
+# since afaik, it's the most popular NN arch library. 
 
 # Suite of functions that will add / remove / replace / retrieve layers
-# from a Vision Transformer.
+# from a vision model.
 
 # The basic vision transformer architecture is -
 # Attention module
@@ -15,7 +15,7 @@ from timm.models.vision_transformer import Block
 # Block module with Attention, Layer Scale, DropPath, MLP, Layer Scale, Drop Path
 
 # We want to be able to retrieve attention masks from the vision transformer. 
-# As well as intermediate representations of the class token. 
+# As well as intermediate representations of the token(s). 
 
 # We can either monkey patch the attention and block modules
 # to return attention, or we can create subclasses of attention
