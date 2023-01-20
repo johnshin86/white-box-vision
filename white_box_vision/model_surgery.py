@@ -34,11 +34,44 @@ def set_value(obj: Any, key: str, value: Any) -> None:
 		setattr(obj, key, value)
 
 def get_value_with_key_path(model: torch.nn.Module, key_path: str) -> Any:
-	"""
-	"""
+	#iterate over key_path and retrieve values
 	for key in key_path.split("."):
 		model = get_value(model, key)
 
 	return model
+
+def set_value_with_key_path(
+	model: torch.nn.Module, 
+	key_path: str, 
+	value: Union[torch.nn.Module, torch.Tensor]) -> None:
+
+	keys = ket_path.split(".")
+
+	#move to penultimate layer in key_path
+	for key in keys[:-1]:
+		model = get_value(model, key)
+
+	#replace penultimate layer with value
+	setattr(model, keys[-1], value)
+
+T = TypeVar("T", bound = torch.nn.Module)
+
+@contextmanager
+def tmp_value_with_key_path(model: T, key_path: str, value: Any) -> Generator[T, None, None]:
+	r"""Temporarily set a value by key path while in context.
+	"""
+	old_value = get_value_with_key_path(model, key_path)
+	set_value_with_key_path(model, key_path, value)
+
+	try:
+		yield model 
+	finally:
+		set_value_with_key_path(model, key_path, old_value)
+
+
+def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
+	"""Get model layers from a model.
+	"""
+
 
 
