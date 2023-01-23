@@ -25,6 +25,10 @@ from timm.models.vision_transformer import Block
 
 #Helper functions to retrieve NN layers using strings. 
 
+#Generator[yield_type, send_type, return_type]
+
+
+# Functions to retrieve layers with strings
 
 def get_value(obj: Any, key: str) -> Any:
 	return obj[int(key)] if key.isdigit() else getattr(obj, key)
@@ -61,7 +65,8 @@ T = TypeVar("T", bound = torch.nn.Module)
 
 
 def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
-	"""Get model layers from a model. Need to think about how to best handle this.
+	"""Get model layers from a model. Need to think about how to best handle this
+	for vision models.
 	"""
 	return None
 
@@ -69,7 +74,7 @@ def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
 # Functions to manipulate a layer
 
 @contextmanager
-def tmp_value_with_key_path(model: T, key_path: str, value: Any) -> Generator[T, None, None]:
+def set_layer(model: T, key_path: str, value: Any) -> Generator[T, None, None]:
 	r"""Temporarily set a value by key path while in context.
 	"""
 	old_value = get_value_with_key_path(model, key_path)
@@ -81,6 +86,52 @@ def tmp_value_with_key_path(model: T, key_path: str, value: Any) -> Generator[T,
 		set_value_with_key_path(model, key_path, old_value)
 
 @contextmanager
+def delete_layers(model: T, indices: list[int]) -> Generator[T, None, None]:
+	list_path, layer_list = get_model_layers(model)
+	modified_list = torch.nn.ModuleList(layer_list)
+
+	for i in sorted(indices, reverse=True):
+		del modified_list[i]
+
+	set_value_with_key_path(model, list_path, modified_list)
+
+	try:
+		yield model
+
+	finally:
+		set_value_with_key_path(model, list_path, layer_list)
+
+@contextmanager
+def permute_layers(model: T, indices: list[int]) -> Generator[T, None, None]:
+	list_path, layer_list = get_model_layers(model)
+	permuted_list = torch.nn.ModuleList([layer_list[i] for i in indices])
+
+	set_value_with_key_path(model, list_path, permuted_list)
+
+	try:
+		yield model 
+	finally:
+		set_value_with_key_path(model, list_path, layer_list)
+
+
+@contextmanager
+def replace_layers(model: T, indices: list[int], replacements: list[torch.nn.Module]) -> Generator[T, None, None]:
+	
+	assert len(indices) == len(replacements), "List of indices should be same length as replacements."
+
+	list_path, layer_list = get_model_layers(model)
+	modified_list = torch.nn.ModuleList(layer_list)
+
+	for i, replacement in zip(indices, replacements):
+		modified_list[i] = replacement  
+
+	set_value_with_key_path(model, list_path, modified_list)
+
+	try:
+		yield model 
+
+	finally:
+		set_value_with_key_path(model, list_path, layer_list)
 
 
 
