@@ -43,13 +43,24 @@ def set_value_with_key_path(
 
 T = TypeVar("T", bound = torch.nn.Module)
 
-
+# Shall we have different functions for huggingface vs timm?
 
 def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
-	"""Get model layers from a model. Need to think about how to best handle this
-	for vision models.
+	"""Get model layers from a model. This looks for a ModuleList which contains
+	the majority of the parameters. This will not include embeddings and the
+	classification layer. 
 	"""
-	pass
+	total_params = sum(p.numel() for p in model.parameters())
+	for name, module in model.named_modules():
+		if isinstance(module, torch.nn.ModuleList):
+			module_params = sum(p.numel() for p in module.parameters())
+
+			if module_params > total_params / 2:
+				return name, module
+
+	raise ValueError(
+		"Could not find `ModuleList` of at least half the model parameters."
+	)
 
 
 # Functions to manipulate a layer
