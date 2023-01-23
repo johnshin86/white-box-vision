@@ -6,8 +6,8 @@ from typing import Any, Generator, Optional, Type, TypeVar, Union
 
 from timm.models.vision_transformer import Block 
 
-# pretrained models will be from timm, 
-# since afaik, it's the most popular NN arch library for vision. 
+# pretrained models will be from huggingface, 
+# since afaik, it's the most popular NN arch library. 
 
 # Suite of functions that will add / remove / replace / retrieve layers
 # from a vision model.
@@ -22,6 +22,8 @@ from timm.models.vision_transformer import Block
 # Accessing specific layers in a pytorch model is a little wonky
 # since it requires typing attributes in a chain. Sometimes
 # the attributes are numbers, and sometimes they are strings.
+
+#Helper functions to retrieve NN layers using strings. 
 
 
 def get_value(obj: Any, key: str) -> Any:
@@ -56,6 +58,16 @@ def set_value_with_key_path(
 
 T = TypeVar("T", bound = torch.nn.Module)
 
+
+
+def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
+	"""Get model layers from a model. Need to think about how to best handle this.
+	"""
+	return None
+
+
+# Functions to manipulate a layer
+
 @contextmanager
 def tmp_value_with_key_path(model: T, key_path: str, value: Any) -> Generator[T, None, None]:
 	r"""Temporarily set a value by key path while in context.
@@ -68,10 +80,14 @@ def tmp_value_with_key_path(model: T, key_path: str, value: Any) -> Generator[T,
 	finally:
 		set_value_with_key_path(model, key_path, old_value)
 
+@contextmanager
 
-def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
-	"""Get model layers from a model.
-	"""
+
+
+
+
+
+
 
 
 
