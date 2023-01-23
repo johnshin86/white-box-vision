@@ -49,7 +49,7 @@ def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
 	"""Get model layers from a model. Need to think about how to best handle this
 	for vision models.
 	"""
-	return None
+	pass
 
 
 # Functions to manipulate a layer
