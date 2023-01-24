@@ -35,21 +35,40 @@ def record_residual_stream(
 	) -> Generator[ResidualStream, None, None]:
 	"""Record every state of the residual stream in a transformer forward pass.
 
+	This is a context manager that adds forward hooks to each `nn.LayerNorm`
+	module in the transformer, storing the output in a dictionary keyed by the 
+	layer norm's name. This dictionary is yielded by the context manager for analysis.
+
 	Parameters
 	----------
-	model
-	include_input
-	norm_class
-	post_norm
-	retain_grads
-	sublayers
+	model: torch.nn.Module
+		
+		Torch model for which to record the residual stream.
 
+	include_input: bool
+		
+		Whether to record the input embeddings.
+
+	norm_class: torch.nn.Module
+		
+		Pytorch normalizing layer.
+
+	post_norm: bool
+
+		Whether the transformer uses LayerNorm after residual connections.
+	
+	retain_grads:
+
+		Whether to retain gradients for recorded states.
+
+	sublayers:
+
+		Whether to record attention and layer outputs separately. 
 
 
 	Returns
 	-------
 	"""
-
 	hooks = []
 	residual_stream = ResidualStream()
 
@@ -70,6 +89,7 @@ def record_residual_stream(
 		residual_stream.attentions.append(process(inputs[0]))
 
 	def store_layer(module: torch.nn.Module, inputs, output: Union[torch.Tensor, tuple]):
+		# Huggingface layers typically return tuples
 		if isinstance(output, tuple):
 			output = output[0]
 			if not isinstance(output, torch.Tensor):
@@ -80,18 +100,20 @@ def record_residual_stream(
 
 	_, layers = get_model_layers(model)
 
+	#Since embedding layer is not in ModuleList, we register a prehook on the input
 	if include_input:
-		hooks.append(layer[0].register_forward_hook(store_layer))
+		hooks.append(layers[0].register_forward_pre_hook(store_embeddings))
 
 	for i, layer in enumerate(layers):
 		hooks.append(layer.register_forward_hook(store_layer))
 
+		#Looking for inner layernorm
 		if sublayers:
 			layer_norms = [m for m in layer.modules() if isinstance(m, norm_class)]
 			if not layer_norms:
 				if sublayers:
 					raise ValueError(
-						f"No LNs found in layer {i}; try specifying `norm_class"
+						f"No LNs found in layer {i}; try specifying `norm_class`"
 					)
 				else:
 					continue
@@ -105,8 +127,10 @@ def record_residual_stream(
 				else:
 					continue
 
+			#Get the post attention layer norm, account for
+			#whether layernorm is applied before or after residual
 			post_attention_ln = layer_norms[0 if post_norm else 1]
-			hooks.append(post_attention_ln.register_forward_hook(store_attention))
+			hooks.append(post_attention_ln.register_forward_pre_hook(store_attention))
 
 	try:
 		yield residual_stream
