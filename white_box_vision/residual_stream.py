@@ -9,8 +9,6 @@ from typing import Callable, Generator, Iterable, Optional, overload, Type, Unio
 from .model_surgery import get_transformer_layers
 
 
-
-
 # functions that generate and store intermediate representations
 # of a vision model. 
 
@@ -32,7 +30,139 @@ class ResidualStream:
 		first, *rest = streams
 		return first.zip_map(lambda *tensors: torch.stack(tensors), *rest)
 
+	def all_reduce_(self):
+		if not dist.is_initialized():
+			return
 
+		for state in self:
+			dist.all_reduce(state)
+			state /= dist.get_world_size()
+
+
+	def clear(self) -> None:
+		self.embeddings = None
+		self.attentions.clear()
+		self.layers.clear()
+
+	@property
+	def has_sublayers(self) -> bool:
+		return bool(self.attentions) and bool(self.layers)
+
+	@property
+	def shape(self):
+		return next(iter(self)).shape
+	
+	def items(
+		self, reverse: bool = False
+	) -> Generator[tuple[str, torch.Tensor], None, None]:
+
+		if not reverse:
+			if self.embeddings is not None:
+				yield "input", self.embeddings 
+
+			for i, (attention, layer) in enumerate(
+				zip_longest(self.attentions, self.layers)
+			):
+
+				if attention is not None:
+					yield f"{i}.attention", attention
+				if layer is not None:
+					yield f"{i}.ffn", layer
+
+		else:
+			attentions, layers = reversed(self.attentions), reversed(self.layers)
+			for i, (attention, layer) in enumerate(zip_longest(attentions, layers)):
+				if layer is not None:
+					yield f"{i}.ffn", layer 
+
+				if attention is not None:
+					yield f"{i}.attention", attention 
+
+			if self.embeddings is not None:
+				yield "input", self.embeddings
+
+	def labels(self) -> list[str]:
+		return [label for label, _ in self.items()]
+
+	def map(self, fn: Callable, reverse: bool = False) -> "ResidualStream":
+		it = reversed(self) if reverse else iter(self)
+		return self.new_from_list(list(map(fn, it)))
+
+	def pairwise_map(
+		self, fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+	) -> "ResidualStream"
+
+		if self.embeddings is None:
+			raise ValueError("Can't map pairwise without input embeddings.")
+
+		states = list(self)
+		return self.new_from_list(list(starmap(fn, zip(states[:-1], states[1:]))))
+
+	def zip_map(self, fn: Callable, *others: "Iterable") -> "ResidualStream":
+		return self.new_from_list(list(starmap(fn, zip(self, *others))))
+
+
+	def new_from_list(self, states: list[torch.Tensor]) -> "ResidualStream":
+		embeddings = states.pop(0) if self.embeddings is not None else None
+
+		if self.has_sublayers:
+			return ResidualStream(
+				embeddings=embeddings, attentions=states[::2], layers=states[1::2]
+			)
+
+		else:
+			return ResidualStream(embeddings=embeddings, layers=states)
+
+	def plot(self, tick_spacing: int = 2, **kwargs):
+		import matplotlib.pyplot as plt
+
+		plt.plot(self, **kwargs)
+		if not self.has_sublayers:
+			plt.xlabel("Layer")
+
+		else:
+			plt.xlabel("Sublayer")
+			plt.xticks(
+				labels=[
+				l for i, l in enumerate(self.labels()) if i % tick_spacing == 0
+			],
+			ticks = range(0, len(self), tick_spacing),
+			rotation = 60,
+			)
+
+	def mean_update(self, other: "ResidualStream", i: int) -> "ResidualStream"
+		return self.zip_map(lambda mu, x: i / (i + 1) * mu + 1 / (i + 1) * x, other)
+
+	def residuals(self) -> "ResidualStream":
+		return self.pairwise_map(lambda s1, s2: s2 - s1)
+
+	def __contains__(self, item: torch.Tensor) -> bool:
+		return any(item.is_set_to(state) for state in self)
+
+	@overload
+	def __getitem__(self, item: slice) -> list[torch.Tensor]:
+		...
+
+	@overload
+	def __getitem__(self, item: int) -> torch.Tensor:
+		...
+
+	def __getitem__(self, item: Union[int, slice]):
+		return list(self)[item]
+
+	def __iter__(self) -> Generator[torch.Tensor, None, None]:
+		for _, state in self.items():
+			yield state
+
+	def __len__(self) -> int:
+		num_states = len(self.attentions) + len(self.layers)
+		if self.embeddings is not None:
+			num_states += 1 
+		return num_states 
+
+	def __reversed__(self) -> Generator[torch.Tensor, None, None]:
+		for _, state in self.items(reverse = True):
+			yield state
 
 @contextmanager
 def record_residual_stream(
@@ -117,7 +247,7 @@ def record_residual_stream(
 
 	for i, layer in enumerate(layers):
 		# There should be a layernorm before and after attention. 
-		# register hook before layernorm of next layer
+		# register hook on input to next layer
 		hooks.append(layer.register_forward_hook(store_layer))
 
 		#Looking for inner layernorm
@@ -140,7 +270,7 @@ def record_residual_stream(
 				else:
 					continue
 			# need to double check the logic is correct here.
-			#Get the post attention layer norm.
+			# Get the post attention layer norm.
 			# In ViT, it is applied after the residual
 			post_attention_ln = layer_norms[0 if post_norm else 1]
 			hooks.append(post_attention_ln.register_forward_pre_hook(store_attention))
