@@ -17,10 +17,21 @@ from .model_surgery import get_transformer_layers
 
 @dataclass
 class ResidualStream:
+	"""Data class of collection of transformer hidden states and derived quantities.
+	"""
 
 	embeddings: Optional[torch.Tensor] = None
 	attentions: list[torch.Tensor] = field(default_factory = list)
 	layers: list[torch.Tensor] = field(default_factory = list)
+
+	@classmethod
+	def stack(cls, streams: list["ResidualStream"]) -> "ResidualStream":
+		if len(streams) < 2:
+			raise ValueError("Expected at least two streams.")
+
+		first, *rest = streams
+		return first.zip_map(lambda *tensors: torch.stack(tensors), *rest)
+
 
 
 @contextmanager
@@ -36,7 +47,7 @@ def record_residual_stream(
 	"""Record every state of the residual stream in a transformer forward pass.
 
 	This is a context manager that adds forward hooks to each `nn.LayerNorm`
-	module in the transformer, storing the output in a dictionary keyed by the 
+	module in the transformer, storing the input in a dictionary keyed by the 
 	layer norm's name. This dictionary is yielded by the context manager for analysis.
 
 	Parameters
@@ -105,6 +116,8 @@ def record_residual_stream(
 		hooks.append(layers[0].register_forward_pre_hook(store_embeddings))
 
 	for i, layer in enumerate(layers):
+		# There should be a layernorm before and after attention. 
+		# register hook before layernorm of next layer
 		hooks.append(layer.register_forward_hook(store_layer))
 
 		#Looking for inner layernorm
@@ -126,9 +139,9 @@ def record_residual_stream(
 
 				else:
 					continue
-
-			#Get the post attention layer norm, account for
-			#whether layernorm is applied before or after residual
+			# need to double check the logic is correct here.
+			#Get the post attention layer norm.
+			# In ViT, it is applied after the residual
 			post_attention_ln = layer_norms[0 if post_norm else 1]
 			hooks.append(post_attention_ln.register_forward_pre_hook(store_attention))
 
