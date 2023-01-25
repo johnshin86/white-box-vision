@@ -6,12 +6,10 @@ from dataclasses import dataclass, field
 from itertools import starmap, zip_longest
 from typing import Callable, Generator, Iterable, Optional, overload, Type, Union
 
-from .model_surgery import get_transformer_layers
-
+from .model_surgery import get_model_layers
 
 # functions that generate and store intermediate representations
 # of a vision model. 
-
 
 @dataclass
 class ResidualStream:
@@ -24,6 +22,8 @@ class ResidualStream:
 
 	@classmethod
 	def stack(cls, streams: list["ResidualStream"]) -> "ResidualStream":
+		"""Stack a list of residual streams into a single stream.
+		"""
 		if len(streams) < 2:
 			raise ValueError("Expected at least two streams.")
 
@@ -31,6 +31,7 @@ class ResidualStream:
 		return first.zip_map(lambda *tensors: torch.stack(tensors), *rest)
 
 	def all_reduce_(self):
+		"""All-reduce all states over distributed workers."""
 		if not dist.is_initialized():
 			return
 
@@ -38,24 +39,29 @@ class ResidualStream:
 			dist.all_reduce(state)
 			state /= dist.get_world_size()
 
-
 	def clear(self) -> None:
+		"""Clear all residual states.
+		"""
 		self.embeddings = None
 		self.attentions.clear()
 		self.layers.clear()
 
 	@property
 	def has_sublayers(self) -> bool:
+		"""Return whether the stream contains both attention and layer outputs."""
 		return bool(self.attentions) and bool(self.layers)
 
 	@property
 	def shape(self):
+		"""Return the shape of the first state.
+		"""
 		return next(iter(self)).shape
 	
 	def items(
 		self, reverse: bool = False
 	) -> Generator[tuple[str, torch.Tensor], None, None]:
-
+		"""Iterate over residual states in topological order, yielding labels.
+		"""
 		if not reverse:
 			if self.embeddings is not None:
 				yield "input", self.embeddings 
@@ -82,16 +88,21 @@ class ResidualStream:
 				yield "input", self.embeddings
 
 	def labels(self) -> list[str]:
+		"""Return labels for the residual states suitable for plotting.
+		"""
 		return [label for label, _ in self.items()]
 
 	def map(self, fn: Callable, reverse: bool = False) -> "ResidualStream":
+		"""Map a function over all states, returning a new `ResidualStream`.
+		"""
 		it = reversed(self) if reverse else iter(self)
 		return self.new_from_list(list(map(fn, it)))
 
 	def pairwise_map(
 		self, fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
-	) -> "ResidualStream"
-
+	) -> "ResidualStream":
+		"""Map over adjacent pairs of states, returning a new `ResidualStream.`
+		"""
 		if self.embeddings is None:
 			raise ValueError("Can't map pairwise without input embeddings.")
 
@@ -99,10 +110,13 @@ class ResidualStream:
 		return self.new_from_list(list(starmap(fn, zip(states[:-1], states[1:]))))
 
 	def zip_map(self, fn: Callable, *others: "Iterable") -> "ResidualStream":
+		"""Map over corresponding states, returning a new `ResidualStream`.
+		"""
 		return self.new_from_list(list(starmap(fn, zip(self, *others))))
 
-
 	def new_from_list(self, states: list[torch.Tensor]) -> "ResidualStream":
+		"""Create a new `ResidualStream` with the given states.
+		"""
 		embeddings = states.pop(0) if self.embeddings is not None else None
 
 		if self.has_sublayers:
@@ -114,6 +128,8 @@ class ResidualStream:
 			return ResidualStream(embeddings=embeddings, layers=states)
 
 	def plot(self, tick_spacing: int = 2, **kwargs):
+		"""Plot the residual states.
+		"""
 		import matplotlib.pyplot as plt
 
 		plt.plot(self, **kwargs)
@@ -130,10 +146,14 @@ class ResidualStream:
 			rotation = 60,
 			)
 
-	def mean_update(self, other: "ResidualStream", i: int) -> "ResidualStream"
+	def mean_update(self, other: "ResidualStream", i: int) -> "ResidualStream":
+		"""Interpret `self` as a running mean and update with `other`.
+		"""
 		return self.zip_map(lambda mu, x: i / (i + 1) * mu + 1 / (i + 1) * x, other)
 
 	def residuals(self) -> "ResidualStream":
+		"""Compute residual (hidden state diff) for each block.
+		"""
 		return self.pairwise_map(lambda s1, s2: s2 - s1)
 
 	def __contains__(self, item: torch.Tensor) -> bool:
@@ -205,10 +225,6 @@ def record_residual_stream(
 	sublayers:
 
 		Whether to record attention and layer outputs separately. 
-
-
-	Returns
-	-------
 	"""
 	hooks = []
 	residual_stream = ResidualStream()
@@ -237,7 +253,7 @@ def record_residual_stream(
 				idx = len(residual_stream.layers)
 				raise RuntimeError(f"Expected first element of layer {idx} output to be a Tensor")
 
-		residual_stream.layers.append(output)
+		residual_stream.layers.append(process(output))
 
 	_, layers = get_model_layers(model)
 

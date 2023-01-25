@@ -3,9 +3,6 @@ import timm
 from contextlib import contextmanager
 from typing import Any, Generator, Optional, Type, TypeVar, Union
 
-
-
-
 # pretrained models will be from huggingface, 
 # since afaik, it's the most popular NN arch library. 
 
@@ -62,7 +59,6 @@ def get_model_layers(model: torch.nn.Module) -> tuple[str, torch.nn.ModuleList]:
 		"Could not find `ModuleList` of at least half the model parameters."
 	)
 
-
 # Functions to manipulate a layer
 
 @contextmanager
@@ -104,7 +100,6 @@ def permute_layers(model: T, indices: list[int]) -> Generator[T, None, None]:
 		yield model 
 	finally:
 		set_value_with_key_path(model, list_path, layer_list)
-
 
 @contextmanager
 def replace_layers(model: T, indices: list[int], replacements: list[torch.nn.Module]) -> Generator[T, None, None]:
